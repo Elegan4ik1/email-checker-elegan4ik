@@ -2,31 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import os
-import sys
-
-DEV_BANNER = r"""
-=================================================
-   ███████╗██╗     ███████╗ ██████╗  █████╗ ███╗   ██╗██╗  ██╗██╗██╗  ██╗
-   ██╔════╝██║     ██╔════╝██╔════╝ ██╔══██╗████╗  ██║██║  ██║██║██║ ██╔╝
-   █████╗  ██║     █████╗  ██║  ███╗███████║██╔██╗ ██║███████║██║█████╔╝ 
-   ██╔══╝  ██║     ██╔══╝  ██║   ██║██╔══██║██║╚██╗██║██╔══██║██║██╔═██╗ 
-   ███████╗███████╗███████╗╚██████╔╝██║  ██║██║ ╚████║██║  ██║██║██║  ██╗
-   ╚══════╝╚══════╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝╚═╝╚═╝  ╚═╝
-
-                     Developer: Elegan4ik
-=================================================
-"""
-
-APP_TITLE = "Email Checker and Reputation — Elegan4ik"
-
-def set_console_title(title: str) -> None:
-    if os.name == "nt":
-        os.system(f"title {title}")
-    else:
-        sys.stdout.write(f"\33]0;{title}\7")
-        sys.stdout.flush()
-
-# дальше идут твои остальные импорты как обычно, каждый с новой строки:
 import time
 import datetime
 import random
@@ -35,6 +10,7 @@ import signal
 from pathlib import Path
 from threading import Lock, Event
 from colorama import Fore, init
+
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -66,19 +42,19 @@ DEFAULT_BATCH_SIZE = 50
 REPUTATION_URL = "https://mailmeteor.com/tools/email-reputation"
 
 # ===== Availability (100% рабочие настройки против "спама") =====
-AVAIL_VALIDATION_TIMEOUT = 25      # максимум ждём 25 секунд
-AVAIL_STABLE_OK_SECONDS = 7.5      # нужно стабильное состояние минимум 4.5 сек
-AVAIL_IGNORE_ERROR_INITIAL = 2.5   # игнорируем первые 1.5 сек ошибки
+AVAIL_VALIDATION_TIMEOUT = 2      # максимум ждём 25 секунд
+AVAIL_STABLE_OK_SECONDS = 1.5      # нужно стабильное состояние минимум 4.5 сек
+AVAIL_IGNORE_ERROR_INITIAL = 1.5   # игнорируем первые 1.5 сек ошибки
 AVAIL_POLL_INTERVAL = 0.25         # проверяем каждые 250 мс
 AVAIL_AFTER_INPUT_DELAY = 0.6
 
 # ===== Reputation =====
-REP_MAX_ATTEMPTS = 4          # было 2
-REP_WAIT_SECONDS = 180        # оставь
-REP_RETRY_BACKOFF = (10, 20, 40, 80)  # было (5, 10)
-REP_REQUIRE_NONZERO = False   # важно: 0 считаем ошибкой в логике, а не как валидный результат
-REP_AFTER_CLICK_DELAY = 6.0   # было 2.0
-UNABLE_MAX_HITS = 3           # было 2
+REP_MAX_ATTEMPTS = 3
+REP_WAIT_SECONDS = 180
+REP_RETRY_BACKOFF = (5, 10)
+REP_REQUIRE_NONZERO = True
+REP_AFTER_CLICK_DELAY = 3.0
+UNABLE_MAX_HITS = 2
 
 stop_event = Event()
 
@@ -379,34 +355,15 @@ def process_domain(domain, logins, checked_cache, cache_lock,
 
         input_el = ensure_input()
 
-        for item in logins:
+        for login in logins:
             if stop_event.is_set():
                 break
 
-            # item может быть как "login", так и "login@domain"
-            raw = (item or "").strip()
-            if "@" in raw:
-                login_part, dom_part = raw.split("@", 1)
-                login = login_part
-                email = f"{login_part}@{dom_part}".lower()
-            else:
-                login = raw
-                email = f"{raw}@{domain}".lower()
-
-            # Если вдруг передали не тот домен — не ломаем цикл, но и не проверяем "не свой" email
-            if "@" in raw:
-                try:
-                    dom_part = raw.split("@", 1)[1].lower()
-                    if dom_part != domain.lower():
-                        print(Fore.YELLOW + f"[{domain}] Пропуск (домен не совпал): {raw}")
-                        mark_login_done(login_done_map, email, domain, done_lock)
-                        continue
-                except:
-                    pass
+            email = f"{login}@{domain}"
 
             with cache_lock:
                 if email in checked_cache:
-                    mark_login_done(login_done_map, email, domain, done_lock)
+                    mark_login_done(login_done_map, login, domain, done_lock)
                     continue
 
             # 2 попытки на один логин (если DOM сломался)
@@ -427,7 +384,6 @@ def process_domain(domain, logins, checked_cache, cache_lock,
                         input_el.send_keys(Keys.CONTROL, "a")
                         input_el.send_keys(Keys.BACKSPACE)
 
-                    # ВАЖНО: в поле вводим только часть до "@"
                     input_el.send_keys(login)
 
                     # микро-действие (важно!)
@@ -465,8 +421,7 @@ def process_domain(domain, logins, checked_cache, cache_lock,
                             checked_cache.add(email)
                         print(Fore.YELLOW + f"{email} — НЕЯСНО (timeout). Записал как ЗАНЯТ (безопасно).")
 
-                    # В этом режиме "единица работы" — полный email
-                    mark_login_done(login_done_map, email, domain, done_lock)
+                    mark_login_done(login_done_map, login, domain, done_lock)
                     time.sleep(0.25)
                     break
 
@@ -481,7 +436,7 @@ def process_domain(domain, logins, checked_cache, cache_lock,
                         with cache_lock:
                             save_cache_line(CACHE_AVAIL, email)
                             checked_cache.add(email)
-                        mark_login_done(login_done_map, email, domain, done_lock)
+                        mark_login_done(login_done_map, login, domain, done_lock)
                         break
 
                     print(Fore.MAGENTA + f"[{domain}] Перезапуск браузера (причина: {e})...")
@@ -500,7 +455,7 @@ def process_domain(domain, logins, checked_cache, cache_lock,
                         with cache_lock:
                             save_cache_line(CACHE_AVAIL, email)
                             checked_cache.add(email)
-                        mark_login_done(login_done_map, email, domain, done_lock)
+                        mark_login_done(login_done_map, login, domain, done_lock)
                         break
 
                     print(Fore.MAGENTA + f"[{domain}] Перезапуск браузера (unknown err: {e})...")
@@ -581,25 +536,22 @@ def _wait_for_ready_score(driver, timeout_seconds: int, require_nonzero: bool = 
 
         score = _parse_meter_score(driver)
 
-        # Если score ещё не распарсился — просто ждём дальше
         if score is not None:
-            # Если требуем ненулевой, а пришёл 0 — считаем, что "ещё не готово"
             if require_nonzero and score == 0:
-                stable_score = None
-                stable_since = None
+                # ждём пока появится ненулевой рейтинг
+                pass
             else:
-                # Считаем значение "готовым", когда оно стабильно держится 2 секунды
                 if stable_score != score:
                     stable_score = score
                     stable_since = time.time()
-                else:
-                    if stable_since is not None and (time.time() - stable_since) >= 2.0:
-                        return stable_score
+                elif (time.time() - stable_since) >= 2.0:  # устойчиво 2 сек
+                    return stable_score
 
         if time.time() - start > timeout_seconds:
             raise TimeoutException("Score not ready (still 0/None).")
 
         time.sleep(0.5)
+
 
 def _get_reputation_with_retry(driver, email: str):
     unable_hits = 0
@@ -611,49 +563,39 @@ def _get_reputation_with_retry(driver, email: str):
         try:
             driver.get(REPUTATION_URL)
             _wait_for_form_ready(driver, timeout_seconds=REP_WAIT_SECONDS)
-            _submit_email_for_reputation(driver, email)
 
+            _submit_email_for_reputation(driver, email)
             print(Fore.YELLOW + f"{email} — попытка {attempt}/{REP_MAX_ATTEMPTS}: если есть Cloudflare, реши вручную")
+
             time.sleep(REP_AFTER_CLICK_DELAY)
 
             score = _wait_for_ready_score(
                 driver,
                 timeout_seconds=REP_WAIT_SECONDS,
-                require_nonzero=False
+                require_nonzero=False  # ⚡ снимаем ограничение
             )
 
-            # Если получили 0 — это не "рейтинг", а страница/JS/лимит не успели.
-            # На слабом ПК лучше не читать сразу второй раз, а дать паузу и повторить попытку заново.
-            if score is None or int(score) == 0:
-                print(Fore.MAGENTA + f"{email} — результат 0/пусто, ждём и пробуем ещё раз...")
-                time.sleep(random.uniform(8, 15))
-                try:
-                    driver.refresh()
-                except:
-                    pass
-                continue
+            # 🔹 Дополнительная проверка: если score == 0 → пробуем ещё раз
+            if score == 0:
+                print(Fore.MAGENTA + f"{email} — результат 0, повторная проверка...")
+                time.sleep(5)  # пауза перед повтором
+                score_retry = _wait_for_ready_score(
+                    driver,
+                    timeout_seconds=REP_WAIT_SECONDS,
+                    require_nonzero=False
+                )
+                if score_retry and score_retry > 0:
+                    return score_retry
 
-            # Успех — сбрасываем счетчик Unable
-            unable_hits = 0
-            return int(score)
+            return score
 
         except UnableToCheckEmail:
             unable_hits += 1
             print(Fore.MAGENTA + f"{email} — Unable... ({unable_hits}/{UNABLE_MAX_HITS})")
-
-            # Дай странице/ПК отдышаться
-            time.sleep(random.uniform(8, 15))
-
-            # refresh вместо мгновенного нового get
-            try:
-                driver.refresh()
-            except:
-                pass
-
             if unable_hits >= UNABLE_MAX_HITS:
-                print(Fore.RED + f"{email} — SKIP: Unable... слишком часто, репутация НЕ получена")
-                return None
-
+                print(Fore.RED + f"{email} — SKIP (Unable... два раза). score=0")
+                return 0
+            time.sleep(2)
             continue
 
         except KeyboardInterrupt:
@@ -664,24 +606,9 @@ def _get_reputation_with_retry(driver, email: str):
             if attempt >= REP_MAX_ATTEMPTS:
                 print(Fore.RED + f"{email} — репутация НЕ получена: {e}")
                 return None
-
-            # backoff из твоего массива + небольшой jitter
             backoff = REP_RETRY_BACKOFF[min(attempt - 1, len(REP_RETRY_BACKOFF) - 1)]
-            backoff = backoff + random.uniform(0.5, 3.0)
-
-            print(Fore.MAGENTA + f"{email} — retry через {backoff:.1f}s (причина: {e})")
+            print(Fore.MAGENTA + f"{email} — retry через {backoff}s (причина: {e})")
             time.sleep(backoff)
-
-            # Если много проблем подряд — перезапускаем драйвер на 3-й и 5-й попытке
-            if attempt in (3, 5):
-                try:
-                    driver.quit()
-                except:
-                    pass
-                try:
-                    driver = make_driver()
-                except:
-                    return None
 
     return None
 
@@ -702,10 +629,9 @@ def check_reputation(emails, out_dir: Path):
 
             score = None
 
-            # кэш читаем, но 0 игнорируем
             if email in rep_cache and str(rep_cache[email]).strip().isdigit():
                 cached = int(rep_cache[email])
-                if cached > 0:
+                if cached != 0:
                     score = cached
                     print(Fore.CYAN + f"{email} — репутация из кэша: {score}")
 
@@ -716,16 +642,13 @@ def check_reputation(emails, out_dir: Path):
                     errf.write(f"{email} | EXC | {repr(e)}\n")
                     score = None
 
-                # кэшируем ТОЛЬКО если score > 0
-                if score is not None and int(score) > 0:
+                if score is not None:
                     save_rep_cache(email, score)
 
-            # если не получили score — в retry_failed
-            if score is None or int(score) <= 0:
+            if score is None:
                 fail.write(email + "\n")
                 continue
 
-            # раскладываем по файлам
             if score >= 71:
                 good.write(f"{email}:{score}\n")
             elif score >= 31:
@@ -734,9 +657,7 @@ def check_reputation(emails, out_dir: Path):
                 bad.write(f"{email}:{score}\n")
 
             print(Fore.GREEN + f"{email} — репутация {score}")
-
-            # было 1.5 — ставим человеческую паузу, чтобы меньше ловить лимит/Unable
-            time.sleep(random.uniform(6, 14))
+            time.sleep(1.5)
 
     except KeyboardInterrupt:
         stop_event.set()
@@ -753,73 +674,83 @@ def check_reputation(emails, out_dir: Path):
 # MAIN
 # ==========================
 def main():
-    set_console_title(APP_TITLE)
-    print(DEV_BANNER)
     ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     out_dir = Path(f"results_{ts}")
     out_dir.mkdir(exist_ok=True)
     print(Fore.CYAN + f"[RESULTS] {out_dir}")
 
-    # В availability-кэше храним и сравниваем emails в lower(), чтобы не зависеть от регистра в mail.txt
-    checked_cache = {x.lower() for x in load_cache_set(CACHE_AVAIL)}
+    checked_cache = load_cache_set(CACHE_AVAIL)
     print(Fore.CYAN + f"[CACHE availability] {len(checked_cache)}")
 
-    mails_file = input(f"Файл логинов ({MAILS_FILE_DEFAULT}): ").strip() or MAILS_FILE_DEFAULT
+    mails_file = input(f"Файл email ({MAILS_FILE_DEFAULT}): ").strip() or MAILS_FILE_DEFAULT
+    raw_emails = load_lines(mails_file)
 
-    original_file_lines = load_lines(mails_file)
-    if not original_file_lines:
+    if not raw_emails:
         print(Fore.RED + f"Файл {mails_file} пустой или отсутствует")
         return
+    # ==========================
+    # ВЫБОР РЕЖИМА РАБОТЫ
+    # ==========================
+    print("\nВыбери режим работы:")
+    print("1 — Проверять занятость логинов + репутацию")
+    print("2 — Проверять ТОЛЬКО репутацию (без проверки занятости)")
 
-    # 1) фильтрация: берём только yahoo.com и aol.com
-    filtered = []
-    for line in original_file_lines:
-        raw = (line or "").strip()
-        if "@" not in raw:
-            continue
-        local, dom = raw.rsplit("@", 1)
-        if not local:
-            continue
-        dom_l = dom.strip().lower()
-        if dom_l in ("yahoo.com", "aol.com"):
-            filtered.append(f"{local.strip()}@{dom_l}".lower())
+    mode = input("Твой выбор (1/2): ").strip()
 
-    if not filtered:
-        print(Fore.YELLOW + "После фильтрации по yahoo.com/aol.com — нечего проверять.")
-        print(Fore.CYAN + "\nГотово.")
+    if mode not in ("1", "2"):
+        print("Неверный выбор")
         return
 
-    # 2) сортировка: сначала все Yahoo, потом все AOL (порядок внутри домена сохраняется как в файле)
-    yahoo_emails = [e for e in filtered if e.endswith("@yahoo.com")]
-    aol_emails   = [e for e in filtered if e.endswith("@aol.com")]
-    process_emails_sorted = yahoo_emails + aol_emails
+    # ===== ТОЛЬКО РЕПУТАЦІЯ =====
+    if mode == "2":
+        emails = [e for e in raw_emails if "@" in e]
+
+        if not emails:
+            print(Fore.RED + "Нет валидных email для проверки репутации")
+            return
+
+        print(Fore.CYAN + f"Проверка ТОЛЬКО репутации ({len(emails)})")
+        check_reputation(emails, out_dir)
+        print(Fore.CYAN + "\nГотово.")
+        return
+    # ==========================
+    # НОВОЕ: фильтрация email
+    # ==========================
+    yahoo_logins = []
+    aol_logins = []
+
+    for email in raw_emails:
+        if "@" not in email:
+            continue
+
+        login, domain = email.rsplit("@", 1)
+        domain = domain.lower()
+
+        if domain == "yahoo.com":
+            yahoo_logins.append(login)
+        elif domain == "aol.com":
+            aol_logins.append(login)
+
+    # СНАЧАЛА YAHOO, ПОТОМ AOL
+    process_logins = yahoo_logins + aol_logins
+
+    if not process_logins:
+        print(Fore.YELLOW + "Нет email с доменами yahoo.com или aol.com")
+        return
 
     limit = int(input("Сколько логинов проверить? (0 = все): ") or "0")
-    process_emails = process_emails_sorted[:limit] if limit > 0 else list(process_emails_sorted)
+    if limit > 0:
+        process_logins = process_logins[:limit]
 
-    # 3) убираем те, что уже в кэше availability
-    cached = [e for e in process_emails if e in checked_cache]
-    process_emails = [e for e in process_emails if e not in set(cached)]
+    # Убираем полностью закэшированные
+    fully_cached = [lg for lg in process_logins if _login_fully_cached(lg, checked_cache)]
+    process_logins = [lg for lg in process_logins if lg not in fully_cached]
 
-    if cached:
-        print(Fore.CYAN + f"[SKIP] Уже в кэше availability: {len(cached)} email(ов)")
+    if fully_cached:
+        print(Fore.CYAN + f"[SKIP] Уже в кэше (yahoo+aol): {len(fully_cached)}")
 
-    if not process_emails:
-        print(Fore.YELLOW + "Нечего проверять: все выбранные email уже есть в checked_cache.txt")
-        # удаляем из mail.txt только те Yahoo/AOL email, которые попали в выбранный лимит и уже в кэше
-        cached_set = set(cached)
-        remaining = []
-        for x in original_file_lines:
-            rx = (x or "").strip()
-            if "@" in rx:
-                loc, dom = rx.rsplit("@", 1)
-                norm = f"{loc.strip()}@{dom.strip().lower()}".lower()
-                if norm in cached_set:
-                    continue
-            remaining.append(rx)
-        write_lines(mails_file, remaining)
-        print(Fore.CYAN + f"[MAIL FILE] Обновил {mails_file}. Осталось: {len(remaining)}")
-        print(Fore.CYAN + "\nГотово.")
+    if not process_logins:
+        print(Fore.YELLOW + "Нечего проверять — всё уже в кэше")
         return
 
     batch = int(input(f"Размер пакета ({DEFAULT_BATCH_SIZE}): ") or DEFAULT_BATCH_SIZE)
@@ -830,30 +761,27 @@ def main():
     cache_lock = Lock()
     done_lock = Lock()
 
-    remaining_lines = list(original_file_lines)
-
     try:
         with open(avail_path, "w", encoding="utf-8") as af, open(busy_path, "w", encoding="utf-8") as bf:
-            for i in range(0, len(process_emails), batch):
+            for i in range(0, len(process_logins), batch):
                 if stop_event.is_set():
                     break
 
-                chunk = process_emails[i:i + batch]
+                chunk = process_logins[i:i + batch]
                 print(Fore.MAGENTA + f"\n=== Пакет {i // batch + 1} ({len(chunk)}) ===")
 
-                # раскладываем по доменам (передаём ПОЛНЫЕ email-адреса)
-                emails_by_domain = {
-                    "yahoo.com": [e for e in chunk if e.endswith("@yahoo.com") and e not in checked_cache],
-                    "aol.com":   [e for e in chunk if e.endswith("@aol.com")   and e not in checked_cache],
+                logins_by_domain = {
+                    dom: _logins_need_domain(dom, chunk, checked_cache)
+                    for dom in SUPPORTED_DOMAINS
                 }
 
                 login_done_map = {}
 
-                # Сначала Yahoo, потом AOL
+                # ВАЖНО: сначала Yahoo, потом AOL
                 for dom in ["yahoo.com", "aol.com"]:
                     process_domain(
                         dom,
-                        emails_by_domain[dom],
+                        logins_by_domain[dom],
                         checked_cache,
                         cache_lock,
                         af,
@@ -862,22 +790,6 @@ def main():
                         done_lock
                     )
 
-                # В этом режиме ключи в login_done_map — это full email
-                done_emails = set(login_done_map.keys())
-                if done_emails:
-                    new_remaining = []
-                    for x in remaining_lines:
-                        rx = (x or "").strip()
-                        if "@" in rx:
-                            loc, dom = rx.rsplit("@", 1)
-                            norm = f"{loc.strip()}@{dom.strip().lower()}".lower()
-                            if norm in done_emails:
-                                continue
-                        new_remaining.append(rx)
-                    remaining_lines = new_remaining
-                    write_lines(mails_file, remaining_lines)
-                    print(Fore.CYAN + f"[MAIL FILE] Удалено из {mails_file}: {len(done_emails)} email(ов). Осталось: {len(remaining_lines)}")
-
     except KeyboardInterrupt:
         stop_event.set()
         print(Fore.YELLOW + "\nОстановка пользователем (Ctrl+C).")
@@ -885,7 +797,7 @@ def main():
     if not stop_event.is_set():
         emails = [l.split(":")[0] for l in load_lines(avail_path)]
         if emails:
-            print(Fore.CYAN + "\nПереход к проверке репутации (Mailmeteor) — ждём результат, затем следующий email")
+            print(Fore.CYAN + "\nПереход к проверке репутации")
             check_reputation(emails, out_dir)
 
     print(Fore.CYAN + "\nГотово.")
